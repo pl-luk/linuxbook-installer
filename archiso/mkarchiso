@@ -183,13 +183,12 @@ _run_mksquashfs() {
     mksquashfs "$@" "${image_path}" -noappend "${airootfs_image_tool_options[@]}" "${mksquashfs_options[@]}"
 }
 
-# Create an ext4 image containing the root file system and pack it inside a squashfs image.
-# Save the squashfs image on the ISO 9660 file system.
-_mkairootfs_ext4+squashfs() {
+# Create an ext4 image containing the root file system and save it on the ISO 9660 file system
+_mkairootfs_ext4() {
     local ext4_hash_seed mkfs_ext4_options=()
     [[ -e "${pacstrap_dir}" ]] || _msg_error "The path '${pacstrap_dir}' does not exist" 1
 
-    _msg_info "Creating ext4 image of 32 GiB and copying '${pacstrap_dir}/' to it..."
+    _msg_info "Creating ext4 image of ${airootfs_ext4_image_size} and copying '${pacstrap_dir}/' to it..."
 
     ext4_hash_seed="$(uuidgen --sha1 --namespace 93a870ff-8565-4cf3-a67b-f47299271a96 \
         --name "${SOURCE_DATE_EPOCH} ext4 hash seed")"
@@ -203,11 +202,21 @@ _mkairootfs_ext4+squashfs() {
     )
     [[ ! "${quiet}" == "y" ]] || mkfs_ext4_options+=('-q')
     rm -f -- "${pacstrap_dir}.img"
-    E2FSPROGS_FAKE_TIME="${SOURCE_DATE_EPOCH}" mkfs.ext4 "${mkfs_ext4_options[@]}" -- "${pacstrap_dir}.img" 32G
+    E2FSPROGS_FAKE_TIME="${SOURCE_DATE_EPOCH}" mkfs.ext4 "${mkfs_ext4_options[@]}" -- "${pacstrap_dir}.img" $airootfs_ext4_image_size
     tune2fs -c 0 -i 0 -- "${pacstrap_dir}.img" >/dev/null
     _msg_info "Done!"
 
     install -d -m 0755 -- "${isofs_dir}/${install_dir}/${arch}"
+    install "${pacstrap_dir}.img" "${isofs_dir}/${install_dir}/${arch}"
+}
+
+# Create an ext4 image containing the root file system and pack it inside a squashfs image.
+# Save the squashfs image on the ISO 9660 file system.
+_mkairootfs_ext4+squashfs() {
+    airootfs_ext4_image_size="32G"
+    _mkairootfs_ext4
+    rm "${isofs_dir}/${install_dir}/${arch}"
+
     _msg_info "Creating SquashFS image, this may take some time..."
     _run_mksquashfs "${pacstrap_dir}.img"
     _msg_info "Done!"
@@ -248,6 +257,8 @@ _mkchecksum() {
         sha512sum airootfs.sfs >airootfs.sha512
     elif [[ -e "${isofs_dir}/${install_dir}/${arch}/airootfs.erofs" ]]; then
         sha512sum airootfs.erofs >airootfs.sha512
+    elif [[ -e "${isofs_dir}/${install_dir}/${arch}/airootfs.img" ]]; then
+        sha512sum airootfs.img >airootfs.sha512
     fi
     cd -- "${OLDPWD}"
     _msg_info "Done!"
@@ -1291,11 +1302,15 @@ _validate_requirements_airootfs_image_type_squashfs() {
     fi
 }
 
-_validate_requirements_airootfs_image_type_ext4+squashfs() {
+_validate_requirements_airootfs_image_type_ext4() {
     if ! { command -v mkfs.ext4 &>/dev/null && command -v tune2fs &>/dev/null; }; then
         (( validation_error=validation_error+1 ))
         _msg_error "Validating '${airootfs_image_type}': mkfs.ext4 and/or tune2fs is not available on this host. Install 'e2fsprogs'!" 0
     fi
+}
+
+_validate_requirements_airootfs_image_type_ext4+squashfs() {
+    _validate_requirements_airootfs_image_type_ext4
     _validate_requirements_airootfs_image_type_squashfs
 }
 
